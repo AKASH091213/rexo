@@ -34,6 +34,13 @@ const int trigPin = D5;
 const int echoPin = D6;
 const int irPin = D7;
 
+// Most relay modules used with ESP8266 are active LOW.
+// Change either value to HIGH if your hardware is active HIGH.
+const int VALVE_ON_LEVEL = LOW;
+const int VALVE_OFF_LEVEL = HIGH;
+const int MOTOR_ON_LEVEL = LOW;
+const int MOTOR_OFF_LEVEL = HIGH;
+
 // -----------------------------
 // Flow sensor variables
 // -----------------------------
@@ -83,27 +90,35 @@ void setup_wifi() {
   Serial.println("\nWiFi connected!");
 }
 
+bool isValveOn() {
+  return digitalRead(valvePin) == VALVE_ON_LEVEL;
+}
+
+bool isMotorOn() {
+  return digitalRead(motorPin) == MOTOR_ON_LEVEL;
+}
+
 void turnValveOn(const char* reason) {
-  digitalWrite(valvePin, HIGH);
+  digitalWrite(valvePin, VALVE_ON_LEVEL);
   Serial.print("Valve ON: ");
   Serial.println(reason);
 }
 
 void turnValveOff(const char* reason) {
-  digitalWrite(valvePin, LOW);
+  digitalWrite(valvePin, VALVE_OFF_LEVEL);
   flowTimerRunning = false;
   Serial.print("Valve OFF: ");
   Serial.println(reason);
 }
 
 void turnMotorOn(const char* reason) {
-  digitalWrite(motorPin, HIGH);
+  digitalWrite(motorPin, MOTOR_ON_LEVEL);
   Serial.print("Motor ON: ");
   Serial.println(reason);
 }
 
 void turnMotorOff(const char* reason) {
-  digitalWrite(motorPin, LOW);
+  digitalWrite(motorPin, MOTOR_OFF_LEVEL);
   Serial.print("Motor OFF: ");
   Serial.println(reason);
 }
@@ -202,6 +217,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     } else {
       turnValveOff("MQTT command");
     }
+    publishTelemetryNow();
     return;
   }
 
@@ -220,6 +236,8 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   } else {
     turnMotorOff("MQTT command");
   }
+
+  publishTelemetryNow();
 }
 
 void reconnect() {
@@ -254,8 +272,8 @@ void handleTelegram() {
         "TotalLitres: " + String(totalLitres, 2) + " L\n" +
         "WaterLevel: " + String(waterLevel, 1) + " cm\n" +
         "PersonDetected: " + String(personDetected ? "YES" : "NO") + "\n" +
-        "Valve: " + String(digitalRead(valvePin) ? "ON" : "OFF") + "\n" +
-        "Motor: " + String(digitalRead(motorPin) ? "ON" : "OFF") + "\n" +
+        "Valve: " + String(isValveOn() ? "ON" : "OFF") + "\n" +
+        "Motor: " + String(isMotorOn() ? "ON" : "OFF") + "\n" +
         "LowThreshold: " + String(lowWaterThreshold, 1) + " cm\n" +
         "HighThreshold: " + String(highWaterThreshold, 1) + " cm\n" +
         "AutoCutoff: " + String(flowRunTimeoutSec) + " sec";
@@ -267,7 +285,7 @@ void handleTelegram() {
 
 void enforceThresholdLimits() {
   if (waterLevel >= highWaterThreshold) {
-    if (digitalRead(motorPin) == HIGH) {
+    if (isMotorOn()) {
       turnMotorOff("High water threshold reached");
     }
 
@@ -280,7 +298,7 @@ void enforceThresholdLimits() {
   }
 
   if (waterLevel <= lowWaterThreshold) {
-    if (digitalRead(motorPin) == LOW) {
+    if (!isMotorOn()) {
       turnMotorOn("Low water threshold reached");
     }
 
@@ -302,7 +320,7 @@ void handleFlowSafety(unsigned long currentTime) {
     return;
   }
 
-  if (flowRate > 0.01 && digitalRead(valvePin) == HIGH) {
+  if (flowRate > 0.01 && isValveOn()) {
     if (!flowTimerRunning) {
       flowTimerRunning = true;
       flowStartTime = currentTime;
@@ -326,14 +344,20 @@ void publishTelemetry() {
     flowRate,
     totalLitres,
     waterLevel,
-    digitalRead(valvePin) ? "true" : "false",
-    digitalRead(motorPin) ? "true" : "false",
+    isValveOn() ? "true" : "false",
+    isMotorOn() ? "true" : "false",
     personDetected ? "true" : "false",
     lowWaterThreshold,
     highWaterThreshold
   );
 
   client.publish(topicSensorData, payload);
+}
+
+void publishTelemetryNow() {
+  waterLevel = getWaterLevel();
+  personDetected = (digitalRead(irPin) == LOW);
+  publishTelemetry();
 }
 
 void setup() {
@@ -392,9 +416,9 @@ void loop() {
   Serial.print(" L | WaterLevel: ");
   Serial.print(waterLevel);
   Serial.print(" cm | Valve: ");
-  Serial.print(digitalRead(valvePin) ? "ON" : "OFF");
+  Serial.print(isValveOn() ? "ON" : "OFF");
   Serial.print(" | Motor: ");
-  Serial.print(digitalRead(motorPin) ? "ON" : "OFF");
+  Serial.print(isMotorOn() ? "ON" : "OFF");
   Serial.print(" | Person: ");
   Serial.println(personDetected ? "DETECTED" : "NOT DETECTED");
 

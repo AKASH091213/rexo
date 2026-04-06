@@ -9,6 +9,11 @@ import { createDashboardSocket } from "../lib/socket";
 import { GoogleLoginButton } from "./google-login-button";
 
 const rangeOptions: TelemetryRange[] = ["24h", "7d", "30d"];
+const COMMAND_PENDING_MS = 5000;
+
+type PendingCommandState = Partial<
+  Record<"valve" | "motor", { value: boolean; expiresAt: number }>
+>;
 
 function formatTimeLabel(timestamp: string, range: TelemetryRange) {
   const date = new Date(timestamp);
@@ -29,6 +34,19 @@ export function DashboardScreen() {
   const [range, setRange] = useState<TelemetryRange>("24h");
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [sendingCommandType, setSendingCommandType] = useState<"valve" | "motor" | null>(null);
+  const [pendingCommands, setPendingCommands] = useState<PendingCommandState>({});
+
+  function mergePendingSnapshot(nextSnapshot: DeviceSnapshot): DeviceSnapshot {
+    const now = Date.now();
+    const valvePending = pendingCommands.valve;
+    const motorPending = pendingCommands.motor;
+
+    return {
+      ...nextSnapshot,
+      valve: valvePending && valvePending.expiresAt > now ? valvePending.value : nextSnapshot.valve,
+      motor: motorPending && motorPending.expiresAt > now ? motorPending.value : nextSnapshot.motor
+    };
+  }
 
   useEffect(() => {
     let active = true;
@@ -69,7 +87,7 @@ export function DashboardScreen() {
         return;
       }
 
-      setSnapshot(dashboard.device);
+      setSnapshot(mergePendingSnapshot(dashboard.device));
       setSettings(dashboard.settings);
       setEvents(dashboard.recentEvents);
       setTelemetry(deviceTelemetry);
@@ -93,7 +111,7 @@ export function DashboardScreen() {
         try {
           const dashboard = await api.getDashboard();
           const deviceTelemetry = await api.getTelemetry(dashboard.device.deviceId, range);
-          setSnapshot(dashboard.device);
+          setSnapshot(mergePendingSnapshot(dashboard.device));
           setSettings(dashboard.settings);
           setEvents(dashboard.recentEvents);
           setTelemetry(deviceTelemetry);
@@ -118,8 +136,21 @@ export function DashboardScreen() {
     socket.on(
       "telemetry:update",
       (payload: { telemetry: TelemetryPoint; snapshot: DeviceSnapshot }) => {
-        setSnapshot(payload.snapshot);
+        setSnapshot(mergePendingSnapshot(payload.snapshot));
         setTelemetry((current) => [...current.slice(-249), payload.telemetry]);
+        setPendingCommands((current) => {
+          const next = { ...current };
+
+          if (current.valve && payload.snapshot.valve === current.valve.value) {
+            delete next.valve;
+          }
+
+          if (current.motor && payload.snapshot.motor === current.motor.value) {
+            delete next.motor;
+          }
+
+          return next;
+        });
       }
     );
     socket.on("settings:update", (payload: DeviceSettings) => {
@@ -132,7 +163,7 @@ export function DashboardScreen() {
     return () => {
       socket.disconnect();
     };
-  }, [snapshot?.deviceId]);
+  }, [snapshot?.deviceId, pendingCommands]);
 
   const chartData = useMemo(
     () =>
@@ -162,7 +193,12 @@ export function DashboardScreen() {
 
     const nextValue = !snapshot[type];
     const previousSnapshot = snapshot;
+    const expiresAt = Date.now() + COMMAND_PENDING_MS;
     setSendingCommandType(type);
+    setPendingCommands((current) => ({
+      ...current,
+      [type]: { value: nextValue, expiresAt }
+    }));
     setSnapshot({
       ...snapshot,
       [type]: nextValue
@@ -172,11 +208,34 @@ export function DashboardScreen() {
       setEvents((current) => current);
     } catch (error) {
       setSnapshot(previousSnapshot);
+      setPendingCommands((current) => {
+        const next = { ...current };
+        delete next[type];
+        return next;
+      });
       throw error;
     } finally {
       setSendingCommandType(null);
     }
   }
+
+  useEffect(() => {
+    if (!pendingCommands.valve && !pendingCommands.motor) {
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      const now = Date.now();
+      setPendingCommands((current) => {
+        const next = { ...current };
+        if (next.valve && next.valve.expiresAt <= now) delete next.valve;
+        if (next.motor && next.motor.expiresAt <= now) delete next.motor;
+        return next;
+      });
+    }, 500);
+
+    return () => clearTimeout(timeout);
+  }, [pendingCommands]);
 
   async function handleSettingsSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();

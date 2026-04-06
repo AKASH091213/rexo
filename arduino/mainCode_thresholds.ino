@@ -217,6 +217,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     } else {
       turnValveOff("MQTT command");
     }
+    publishTelemetryNow();
     return;
   }
 
@@ -235,6 +236,8 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   } else {
     turnMotorOff("MQTT command");
   }
+
+  publishTelemetryNow();
 }
 
 void reconnect() {
@@ -349,6 +352,12 @@ void publishTelemetry() {
   );
 
   client.publish(topicSensorData, payload);
+}
+
+void publishTelemetryNow() {
+  waterLevel = getWaterLevel();
+  personDetected = (digitalRead(irPin) == LOW);
+  publishTelemetry();
 }
 
 void setup() {
