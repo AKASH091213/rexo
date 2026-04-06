@@ -1,0 +1,14 @@
+{
+  "name": "iot-water-system",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @iot/shared && npm run build -w @iot/backend && npm run build -w @iot/frontend",
+    "dev:frontend": "npm run dev -w @iot/frontend",
+    "dev:backend": "npm run dev -w @iot/backend",
+    "typecheck": "npm run build -w @iot/shared && npm run typecheck -w @iot/backend && npm run typecheck -w @iot/frontend"
+  }
+}
