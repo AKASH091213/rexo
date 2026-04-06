@@ -1,6 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "baseUrl": ".",
     "jsx": "preserve",
     "lib": [
       "dom",
@@ -10,6 +11,11 @@
     "allowJs": true,
     "incremental": true,
     "isolatedModules": true,
+    "paths": {
+      "@iot/shared": [
+        "../../packages/shared/src/index.ts"
+      ]
+    },
     "plugins": [
       {
         "name": "next"
